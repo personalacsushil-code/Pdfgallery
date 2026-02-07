@@ -30,7 +30,6 @@
         /* Buttons */
         .card-actions { display: flex; gap: 8px; }
         .action-btn { border: none; background: #f1f5f9; font-size: 18px; cursor: pointer; padding: 8px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
-        .share-icon { color: var(--primary); font-weight: bold; }
 
         /* Viewer UI */
         #viewerScreen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0f172a; z-index: 5000; flex-direction: column; }
@@ -39,8 +38,9 @@
         /* Right side buttons in viewer */
         .nav-right { display: flex; gap: 10px; }
         
-        /* Top Buttons */
+        /* Common style for Top Buttons */
         .top-btn { border: none; padding: 8px 12px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+        .share-btn { background: var(--primary); color: white; }
         .download-btn { background: var(--success); color: white; }
 
         #canvasContainer { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 10px; }
@@ -92,7 +92,8 @@
     <div class="viewer-nav">
         <button onclick="closeViewer()" style="background:none; border:none; color:white; font-size:24px;">✕</button>
         <div class="nav-right">
-            <button class="top-btn download-btn" id="viewDownloadBtn">⬇ Save PDF</button>
+            <button class="top-btn download-btn" id="viewDownloadBtn">⬇ Save</button>
+            <button class="top-btn share-btn" id="viewShareBtn">📤 Share</button>
         </div>
     </div>
     <div id="canvasContainer"></div>
@@ -102,193 +103,7 @@
     let db, allPDFs = [], activeFile = null, deleteTargetId = null;
 
     // Database Setup
-    const request = indexedDB.open("PDF_Gallery_Final_v10", 1);
-    request.onupgradeneeded = (e) => e.target.result.createObjectStore("pdfs", { keyPath: "id", autoIncrement: true });
-    request.onsuccess = (e) => { db = e.target.result; loadFromDB(); };
-
-    // --- Upload Function ---
-    function uploadPDF(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            db.transaction(["pdfs"], "readwrite").objectStore("pdfs").add({ 
-                name: file.name, 
-                data: e.target.result, 
-                timestamp: Date.now() 
-            });
-            loadFromDB();
-        };
-        reader.readAsDataURL(file);
-    }
-
-    // --- Load Data ---
-    function loadFromDB() {
-        allPDFs = [];
-        db.transaction("pdfs").objectStore("pdfs").openCursor().onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) { allPDFs.push(cursor.value); cursor.continue(); }
-            else { 
-                allPDFs.sort((a, b) => b.timestamp - a.timestamp);
-                renderList(allPDFs); 
-            }
-        };
-    }
-
-    // --- Render List (Ab SHARE button yahan hai) ---
-    function renderList(items) {
-        const list = document.getElementById('pdfList');
-        list.innerHTML = items.length === 0 ? "<p style='text-align:center; color:#94a3b8; margin-top:50px;'>No PDFs found</p>" : "";
-        items.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'pdf-card';
-            div.innerHTML = `
-                <div class="pdf-icon" onclick="openPDF(${item.id})">📕</div>
-                <div class="pdf-info" onclick="openPDF(${item.id})">
-                    <span class="pdf-name">${item.name}</span>
-                </div>
-                <div class="card-actions">
-                    <button class="action-btn share-icon" onclick="sharePDF(${item.id})">📤</button>
-                    <button class="action-btn" style="color:var(--danger)" onclick="askDelete(${item.id})">🗑️</button>
-                </div>
-            `;
-            list.appendChild(div);
-        });
-    }
-
-    function searchPDF() {
-        const query = document.getElementById('searchInput').value.toLowerCase();
-        renderList(allPDFs.filter(p => p.name.toLowerCase().includes(query)));
-    }
-
-    // --- SHARE LOGIC (Bahar se kaam karega) ---
-    async function sharePDF(id) {
-        // Find file by ID
-        const fileData = allPDFs.find(p => p.id === id);
-        if (!fileData) return;
-
-        try {
-            // Convert Data to File
-            const response = await fetch(fileData.data);
-            const blob = await response.blob();
-            
-            // Name Fix
-            let safeName = fileData.name;
-            if (!safeName.toLowerCase().endsWith('.pdf')) {
-                safeName += '.pdf';
-            }
-
-            const file = new File([blob], safeName, { type: 'application/pdf' });
-
-            // Native Share
-            if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                    files: [file],
-                    title: safeName
-                    // Note: 'text' hata diya hai taaki sirf file jaye
-                });
-            } else {
-                alert("Sharing not supported on this device.");
-            }
-        } catch (error) {
-            console.warn("Share failed:", error);
-            if (error.name !== 'AbortError') {
-                alert("Share failed. Try opening the file and saving it.");
-            }
-        }
-    }
-
-    // --- DOWNLOAD LOGIC (Viewer ke andar) ---
-    async function handleDownload() {
-        if (!activeFile) return;
-        
-        try {
-            const response = await fetch(activeFile.data);
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = activeFile.name;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            alert("Download failed. Try taking a screenshot or Print.");
-        }
-    }
-
-    // --- Viewer Logic ---
-    async function openPDF(id) {
-        activeFile = allPDFs.find(p => p.id === id);
-        document.getElementById('viewerScreen').style.display = 'flex';
-        const container = document.getElementById('canvasContainer');
-        container.innerHTML = "<p style='color:white; margin-top:20px;'>Rendering PDF...</p>";
-
-        // Attach Download Button Listener
-        document.getElementById('viewDownloadBtn').onclick = handleDownload;
-
-        const pdfjsLib = window['pdfjs-dist/build/pdf'];
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-        
-        try {
-            const pdf = await pdfjsLib.getDocument(activeFile.data).promise;
-            container.innerHTML = "";
-            for (let n = 1; n <= pdf.numPages; n++) {
-                const page = await pdf.getPage(n);
-                const vp = page.getViewport({ scale: 1.0 }); 
-                const canvas = document.createElement('canvas');
-                canvas.height = vp.height; 
-                canvas.width = vp.width;
-                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-                container.appendChild(canvas);
-            }
-        } catch(e) { 
-            console.error(e);
-            container.innerHTML = "<p style='color:red'>Error loading PDF</p>"; 
-        }
-    }
-
-    // --- Delete Logic ---
-    function askDelete(id) { deleteTargetId = id; document.getElementById('confirmModal').style.display = 'flex'; }
-    function closeModal() { document.getElementById('confirmModal').style.display = 'none'; }
-    document.getElementById('confirmDeleteBtn').onclick = () => {
-        db.transaction(["pdfs"], "readwrite").objectStore("pdfs").delete(deleteTargetId);
-        loadFromDB(); closeModal();
-    };
-
-    function closeViewer() { 
-        document.getElementById('viewerScreen').style.display = 'none'; 
-        document.getElementById('canvasContainer').innerHTML = ""; 
-        activeFile = null;
-    }
-</script>
-</body>
-</html>
-        <p style="color:#64748b; font-size:14px; margin-top:10px;">Are you sure you want to delete this file?</p>
-        <div class="modal-btns">
-            <button class="m-btn" style="background:#f1f5f9" onclick="closeModal()">No</button>
-            <button class="m-btn" style="background:var(--danger); color:white" id="confirmDeleteBtn">Yes, Delete</button>
-        </div>
-    </div>
-</div>
-
-<div id="viewerScreen">
-    <div class="viewer-nav">
-        <button onclick="closeViewer()" style="background:none; border:none; color:white; font-size:24px;">✕</button>
-        <div class="nav-right">
-            <button class="share-btn-top" id="viewShareBtn">📤 Share / Save</button>
-        </div>
-    </div>
-    <div id="canvasContainer"></div>
-</div>
-
-<script>
-    let db, allPDFs = [], activeFile = null, deleteTargetId = null;
-
-    // Database Setup
-    const request = indexedDB.open("PDF_Gallery_Safe_v7", 1);
+    const request = indexedDB.open("PDF_Gallery_Final_v9", 1);
     request.onupgradeneeded = (e) => e.target.result.createObjectStore("pdfs", { keyPath: "id", autoIncrement: true });
     request.onsuccess = (e) => { db = e.target.result; loadFromDB(); };
 
@@ -346,40 +161,67 @@
         renderList(allPDFs.filter(p => p.name.toLowerCase().includes(query)));
     }
 
-    // --- SMART SHARE LOGIC ---
+    // --- UTILS: Get Blob from Base64 ---
+    async function getFileBlob() {
+        if (!activeFile) return null;
+        const response = await fetch(activeFile.data);
+        return await response.blob();
+    }
+
+    // --- SHARE LOGIC (Fixed: Sends ONLY file) ---
     async function handleShare() {
         if (!activeFile) return;
-
-        const shareBtn = document.getElementById('viewShareBtn');
-        const originalText = shareBtn.innerText;
-        shareBtn.innerText = "Processing...";
+        const btn = document.getElementById('viewShareBtn');
+        const oldText = btn.innerHTML;
+        btn.innerText = "⏳...";
 
         try {
-            // 1. Convert Base64 Data URL to Blob
-            const response = await fetch(activeFile.data);
-            const blob = await response.blob();
-            const file = new File([blob], activeFile.name, { type: 'application/pdf' });
+            const blob = await getFileBlob();
+            
+            // Fix Name: Ensure it ends with .pdf
+            let safeName = activeFile.name;
+            if (!safeName.toLowerCase().endsWith('.pdf')) {
+                safeName += '.pdf';
+            }
 
-            // 2. Try Native Share
+            const file = new File([blob], safeName, { type: 'application/pdf' });
+
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 await navigator.share({
                     files: [file],
-                    title: activeFile.name,
-                    text: 'Shared from PDF Gallery'
+                    title: safeName
+                    // Important: Removed 'text' property to force file sharing
                 });
             } else {
-                throw new Error("Native sharing not supported.");
+                alert("Sharing not supported on this device/browser.");
             }
         } catch (error) {
             console.warn("Share failed:", error);
-            
-            // 3. Fallback: Print to PDF (Safe for HopWeb)
-            const usePrint = confirm("Share menu failed or not supported.\n\nDo you want to Save as PDF using Print?");
-            if(usePrint) {
-                setTimeout(() => window.print(), 500);
+            if (error.name !== 'AbortError') {
+                alert("Error sharing file. Please use the Download button instead.");
             }
         } finally {
-            shareBtn.innerText = originalText;
+            btn.innerHTML = oldText;
+        }
+    }
+
+    // --- DOWNLOAD LOGIC (New Feature) ---
+    async function handleDownload() {
+        if (!activeFile) return;
+        
+        try {
+            const blob = await getFileBlob();
+            const url = URL.createObjectURL(blob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = activeFile.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert("Download failed. Try 'Print' option.");
         }
     }
 
@@ -390,7 +232,9 @@
         const container = document.getElementById('canvasContainer');
         container.innerHTML = "<p style='color:white; margin-top:20px;'>Rendering PDF...</p>";
 
+        // Attach Button Listeners
         document.getElementById('viewShareBtn').onclick = handleShare;
+        document.getElementById('viewDownloadBtn').onclick = handleDownload;
 
         const pdfjsLib = window['pdfjs-dist/build/pdf'];
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
@@ -404,11 +248,7 @@
                 const canvas = document.createElement('canvas');
                 canvas.height = vp.height; 
                 canvas.width = vp.width;
-                
-                await page.render({
-                    canvasContext: canvas.getContext('2d'),
-                    viewport: vp
-                }).promise;
+                await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
                 container.appendChild(canvas);
             }
         } catch(e) { 
